@@ -191,39 +191,52 @@ def OffSetExtract(bamFile, startCodon, pre, logout, pathBedtools='', pathSamtool
         pickle.dump(Len, ff)
 
 
-def read_bam(bam_file, sl):
-    os.system(f"samtools view -h {bam_file} | less -S > test.txt")
+def read_bam(bam_file, sl, soft_num, filetype):
+    soft_num = int(soft_num)
+    if filetype == 'bam':
+        os.system(f"samtools view -h {bam_file} | less -S > test.txt")
+    else:
+        os.system(f"cp {bam_file} ./test.txt")
     SLTrans = {}
     with open('test.txt', 'r') as f:
         whole_db = f.readlines()
         for single in whole_db:
-            if single.startswith(('@','#')): continue
-            single = single.split()                                 
+            if single.startswith(('@', '#')): continue
+            single = single.split()
             seq_mod = single[5]
             CigarValues = re.split("[A-Z]", seq_mod)
             slPosition, softclip = 0, 0
             slTail = ''
-            if seq_mod.endswith('S'):                               
+            if seq_mod.endswith('S'):
                 softclip = int(CigarValues[-2])
-                if softclip < 8: continue
-                slPosition = int(single[3]) + sum(map(int,list(CigarValues[:-2])))
-                slTail = RC(single[9][-1*softclip:])
-            elif 'S' in seq_mod:                                    
+                if softclip < soft_num: continue
+                slPosition = int(single[3]) + sum(map(int, list(CigarValues[:-2])))
+                slTail = RC(single[9][-1 * softclip:])
+            elif 'S' in seq_mod:
                 softclip = int(CigarValues[0])
-                if softclip < 8: continue
+                if softclip < soft_num: continue
                 slPosition = int(single[3])
                 slTail = single[9][:softclip]
             else:
                 continue
 
-            for slSeq in sl.split(','):                                # multiple SL sequences
+            for slSeq in sl.split(','):  # multiple SL sequences
                 if slSeq.endswith(slTail):
                     coordFull = (single[2], slPosition)
-                    if coordFull not in SLTrans: SLTrans[coordFull] = {}
-                    if slSeq not in SLTrans[coordFull]: SLTrans[coordFull][slSeq] = 0
-                    SLTrans[coordFull][slSeq] += 1                            
+                elif slTail in slSeq:
+                    tailExtend = len(slSeq.split(slTail)[-1])
+                    # sys.stdout.write(slSeq + '\t\t' + slTail + str(tailExtend) +'\n')
+                    coordFull = (single[2], slPosition - tailExtend) if seq_mod.endswith('S') else (
+                    single[2], slPosition + tailExtend)
+                else:
+                    continue
+                if coordFull not in SLTrans: SLTrans[coordFull] = {}
+                if slSeq not in SLTrans[coordFull]: SLTrans[coordFull][slSeq] = 0
+                SLTrans[coordFull][slSeq] += 1
+
     os.system('rm -f test.txt')
     return (SLTrans)
+
 
 def codonusage(transId, GFF, SEQ):
     Codon = {}
@@ -435,7 +448,7 @@ def finder(PreOrf, pcov=0.00001, startCodon='AUG', entropy=1):
                     if (tga - atg) % 3 != 0: continue
                     if i > 0 and atg < PosFrameTGA[frameTGA][i - 1] and (
                             PosFrameTGA[frameTGA][i - 1] - atg) % 3 == 0: continue
-                    if '-' not in slSeq and atg > len(slSeq)-1:continue     
+                    if '-' not in slSeq and atg > len(slSeq) - 1: continue
 
                     orfSeq = seqLine[atg:tga + 3]
                     orfCoord = Coord[atg:tga + 3]
@@ -615,14 +628,14 @@ def OrfFinder(entropy, startCodon, inRef, inGtf, pcov, nCores, SLTrans, transOnl
             coordFull = (cchr, coord)
             if coordFull in SLTrans:
                 for slSeq in SLTrans[coordFull]:
-                    if SLTrans[coordFull][slSeq] < 1: continue                                 
+                    if SLTrans[coordFull][slSeq] < 1: continue
                     sltranscript, slcoord = TransSplicing(transcript, Coord, i, slSeq)
-                    #print(f'\n {coordFull} \n {sltranscript}')
+                    # print(f'\n {coordFull} \n {sltranscript}')
                     SLtranscript.append(sltranscript)
                     SLcoord.append(slcoord)
                     SLSeq.append(slSeq)
-        if len(SLtranscript) == transOnly: continue            
-        for k in range(transOnly,len(SLtranscript)):            # TransOnly: 0/1，1: only transORF, 0: all ORFs
+        if len(SLtranscript) == transOnly: continue
+        for k in range(transOnly, len(SLtranscript)):  # TransOnly: 0/1，1: only transORF, 0: all ORFs
             Dep, Usage = [], []
             slSeq = SLSeq[k]
             for i in range(len(SLtranscript[k])):
@@ -633,8 +646,11 @@ def OrfFinder(entropy, startCodon, inRef, inGtf, pcov, nCores, SLTrans, transOnl
                 usage = USAGE[codon] if codon in USAGE else 0
                 Dep.append(dep)
                 Usage.append(usage)
-            if k > 0: transId = transId + "_sl_" + str(k)
-            idLine = transId + '\t' + cchr + '\t' + strand + '\t' + slSeq
+            if k > 0:
+                transId_sl = transId + "_sl_" + str(k)
+                idLine = transId_sl + '\t' + cchr + '\t' + strand + '\t' + slSeq
+            else:
+                idLine = transId + '\t' + cchr + '\t' + strand + '\t' + slSeq
 
             if sum(Dep) == 0: continue
             seqLine = SLtranscript[k]
@@ -650,7 +666,10 @@ def OrfFinder(entropy, startCodon, inRef, inGtf, pcov, nCores, SLTrans, transOnl
     else:
         Orfs = map(partial(finder, pcov=pcov, startCodon=startCodon, entropy=entropy), PreOrf)
 
-    Orfs = fdr(Orfs)
+    if transOnly == 0:
+        Orfs = list(filter(len,Orfs))
+    else:
+        Orfs = fdr(Orfs)
     with open(pre + '_orf.fa', 'w') as f:
         f.write(''.join(filter(len, Orfs)))
 
@@ -734,17 +753,21 @@ def gffMaker(inGtf, startBed, stopBed, inCds, fileOutGff, outFa, outTable, outSu
         Coord = list(map(int, coordLine.split()))
         orfId, cchr, strand, orfPval, transId, info = idLine.replace('>', '').split('\t')
         Start, End = [], []
+        ii = 0
         for i in range(len(Coord)):
-            if i == 0:
-                Start.append(Coord[i])
-            elif i == len(Coord) - 1:
-                End.append(Coord[i])
-            elif strand == '+' and Coord[i] + 1 != Coord[i + 1]:
-                Start.append(Coord[i + 1])
-                End.append(Coord[i])
-            elif strand == '-' and Coord[i] - 1 != Coord[i + 1]:
-                Start.append(Coord[i + 1])
-                End.append(Coord[i])
+            if Coord[i] == 0:
+                ii += 1
+            else:
+                if i - ii == 0:
+                    Start.append(Coord[i])
+                elif i == len(Coord) - 1:
+                    End.append(Coord[i])
+                elif strand == '+' and Coord[i] + 1 != Coord[i + 1]:
+                    Start.append(Coord[i + 1])
+                    End.append(Coord[i])
+                elif strand == '-' and Coord[i] - 1 != Coord[i + 1]:
+                    Start.append(Coord[i + 1])
+                    End.append(Coord[i])
         '''
         修改0（只修改了第一列，没有修改剩余列）
         # 修改gff，防止起始密码子坐标为0
@@ -754,18 +777,20 @@ def gffMaker(inGtf, startBed, stopBed, inCds, fileOutGff, outFa, outTable, outSu
         for end_num in range(1, len(Start)):
             if int(End[-1*end_num]) != 0:
                 endOrf = End[-1*end_num]
-        '''
+        
         # 修改gff，防止起始密码子坐标为0（将0全部去除）
         sa = Start.count(0)
         en = End.count(0)
-        for start_num in range(0,sa):
+        for start_num in range(0, sa):
             Start.remove(0)
-        for end_num in range(0,en):
+        for end_num in range(0, en):
             End.remove(0)
+        '''
 
         startOrf, endOrf = int(Start[0]), int(End[-1])
-        #print(startOrf)
-        #print(Start)
+
+        # print(startOrf)
+        # print(Start)
         orfClass = ''
         geneId = transId.split('.')[0]
 
@@ -810,15 +835,15 @@ def gffMaker(inGtf, startBed, stopBed, inCds, fileOutGff, outFa, outTable, outSu
         else:
             orfClass = 'intergenic_ORF'
         if '_sl_' in transId:
-            orfClass = 'transORF'
+            orfClass = 'sl_transORF'
         OrfClass[orfId] = orfClass
-        print(cchr + '\tRiboNT\t' + orfClass + '\t' + '\t'.join(
+        print(cchr + '\tslORFfinder\t' + orfClass + '\t' + '\t'.join(
             list(map(str, sorted([startOrf, endOrf])))) + '\t' + orfPval + '\t' + strand + '\t.\tID=' + orfId,
               file=fileOut)
         for i in range(len(Start)):
             start = Start[i] if strand == '+' else End[i]
             end = End[i] if strand == '+' else Start[i]
-            print(cchr + '\tRiboNT\texon\t' + str(start) + '\t' + str(end) + '\t.\t' + strand + '\t.\tParent=' + orfId,
+            print(cchr + '\tslORFfinder\texon\t' + str(start) + '\t' + str(end) + '\t.\t' + strand + '\t.\tParent=' + orfId,
                   file=fileOut)
     fileIn.close()
     fileOut.close()
