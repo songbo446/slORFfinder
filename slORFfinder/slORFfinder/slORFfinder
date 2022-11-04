@@ -26,7 +26,9 @@ def main():
         --Rscript       Path to Rscript
         --bedtools      Path to bedtools
         --samtools      Path to samtools
-
+        --slseed        The number of soft clipped reads [default: 8]
+        --filetype      bam/sam file type [default: bam]
+ 
 """
     startCodon, outdir, prefix = 'AUG,UUG,CUG,GUG', 'slORF', 'ribosl'
     pathR = ""
@@ -35,11 +37,13 @@ def main():
     nCores = 5
     pcov = 0.00000000001
     transOnly = 1
+    softclip = 8
+    filetype = 'bam'
     #sl = 'GGTTTAATTACCCAAGTTTGAG'  # NEMATODA
     try:
         opts, args = getopt.getopt(sys.argv[1:], "h",
                                    ["help", "genome=", "gtf=", "SL=", "rna=", "ribo=", "pcov=", "nCores=", "transOnly=", "start=", "outdir=",
-                                    "prefix=", "Rscript=", "bedtools=", "samtools="])
+                                    "prefix=", "Rscript=", "bedtools=", "samtools=", "slseed=","filetype="])
     except:
         sys.stdout.write(usage)
         sys.exit()
@@ -92,7 +96,12 @@ def main():
             pathBedtools = arg
         elif opt in ('--samtools'):
             pathSamtools = arg
+        elif opt in ('--slseed'):
+            softclip = arg
+        elif opt in ('--filetype'):
+            filetype = arg
 
+    softclip = int(softclip)
     genome = os.path.abspath(genome)
     gtf = os.path.abspath(gtf)
     bamRNA = os.path.abspath(bamRNA)
@@ -137,7 +146,8 @@ def main():
                                                                                   prefix + '_multitaper.Freq.txt',
                                                                                   prefix)
 
-    SLTrans = ribosl.read_bam(bamRNA, sl)
+    sys.stdout.write("\tDetecting splicing sites" + '\n')
+    SLTrans = ribosl.read_bam(bamRNA, sl, softclip, filetype)
     sys.stdout.write("\tPredicting ORFs" + '\n')
     if not os.path.exists(prefix + '_orf.fa'): ribosl.OrfFinder(entropy, startCodon, genome, gtf, pcov, nCores, SLTrans,
                                                                 transOnly, prefix)
